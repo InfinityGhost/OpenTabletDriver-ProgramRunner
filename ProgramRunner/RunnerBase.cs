@@ -4,18 +4,20 @@ using OpenTabletDriver.Plugin.Attributes;
 
 // ReSharper disable MemberCanBePrivate.Global
 // ReSharper disable MemberCanBeProtected.Global
+// ReSharper disable UnusedMember.Global
+// ReSharper disable UnusedAutoPropertyAccessor.Global
 
 namespace ProgramRunner
 {
     public class RunnerBase : IDisposable
     {
-        private string? _programPath;
-        private string? _workingDirectory;
+        private string? _programPath, _workingDirectory;
+        private Process? _process;
 
-        protected const string LOG_GROUP = "ProgramRunner";
+        private const string LOG_GROUP = "ProgramRunner";
 
         [Property("Program Path")]
-        public string? ProgramPath
+        public string ProgramPath
         {
             set
             {
@@ -25,8 +27,11 @@ namespace ProgramRunner
                     Log.Write(LOG_GROUP, "No file was found at the program path provided.", LogLevel.Warning);
                 }
             }
-            get => _programPath;
+            get => _programPath!;
         }
+
+        [Property("Arguments")]
+        public string? Arguments { set; get; }
 
         [Property("Working Directory")]
         public string? WorkingDirectory
@@ -36,33 +41,51 @@ namespace ProgramRunner
                 _workingDirectory = value;
                 if (!string.IsNullOrWhiteSpace(_workingDirectory) && !Directory.Exists(_workingDirectory))
                 {
-                    Log.Write(LOG_GROUP, "The working directory at the specified path does not exist.", LogLevel.Warning);
+                    Log.Write(LOG_GROUP, "The working directory at the specified path does not exist.",
+                        LogLevel.Warning);
                 }
             }
-            get => _workingDirectory;
+            get => Directory.Exists(_workingDirectory) ? _workingDirectory : Directory.GetParent(ProgramPath)!.FullName;
         }
 
-        private Process? Process { set; get; }
+        [BooleanProperty("Redirect standard output", "Redirect standard output to Log")]
+        public bool RedirectStandardOutput { set; get; }
 
         protected void Start()
         {
-            if (Process is not null)
+            if (_process is not null)
                 return;
 
             if (File.Exists(ProgramPath))
             {
-                string directory = Directory.Exists(WorkingDirectory)
-                    ? WorkingDirectory
-                    : Directory.GetParent(ProgramPath)!.FullName;
-
                 Log.Write(LOG_GROUP, $"Starting process: {ProgramPath}");
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = ProgramPath,
-                    WorkingDirectory = directory
+                    Arguments = Arguments,
+                    WorkingDirectory = WorkingDirectory,
+
+                    // Redirecting stdout requires disabling shell execute
+                    RedirectStandardOutput = RedirectStandardOutput,
+                    UseShellExecute = !RedirectStandardOutput
                 };
 
-                Process = Process.Start(startInfo);
+                try
+                {
+                    _process = Process.Start(startInfo)!;
+
+                    if (RedirectStandardOutput)
+                    {
+                        _process.OutputDataReceived += ConsoleToLog;
+                        _process.BeginOutputReadLine();
+                    }
+                }
+                catch (Exception e)
+                {
+                    Log.Exception(e);
+                    _process?.Dispose();
+                    _process = null;
+                }
             }
             else
             {
@@ -72,13 +95,13 @@ namespace ProgramRunner
 
         protected void Stop()
         {
-            if (Process is null)
+            if (_process is null)
                 return;
 
             try
             {
-                Process.Kill(true);
-                Process = null;
+                _process.Kill(true);
+                _process = null;
             }
             catch (Exception e)
             {
@@ -88,7 +111,7 @@ namespace ProgramRunner
 
         protected void StartStop()
         {
-            if (Process is null)
+            if (_process is null)
                 Start();
             else
                 Stop();
@@ -96,9 +119,17 @@ namespace ProgramRunner
 
         public virtual void Dispose()
         {
-            Process?.Dispose();
-            Process = null;
+            _process?.Dispose();
+            _process = null;
             GC.SuppressFinalize(this);
+        }
+
+        private void ConsoleToLog(object? sender, DataReceivedEventArgs e)
+        {
+            if (e.Data != null)
+            {
+                Log.Write(LOG_GROUP, e.Data);
+            }
         }
     }
 }

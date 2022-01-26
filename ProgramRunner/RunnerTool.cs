@@ -1,7 +1,11 @@
 using OpenTabletDriver.Plugin;
+using OpenTabletDriver.Plugin.Attributes;
+
+// ReSharper disable UnusedType.Global
 
 namespace ProgramRunner
 {
+    [PluginName("Program Runner")]
     public class RunnerTool : RunnerBase, ITool
     {
         public bool Initialize()
