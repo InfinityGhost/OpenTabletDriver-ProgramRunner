@@ -1,0 +1,6 @@
+bin/
+obj/
+
+# IDE settings
+.vscode/
+.idea/
